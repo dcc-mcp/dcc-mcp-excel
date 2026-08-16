@@ -1,7 +1,7 @@
 # dcc-mcp-excel
 
 Excel adapter for the DCC-MCP ecosystem — thin application layer over
-[dcc-mcp-office](https://github.com/loonghao/dcc-mcp-office).
+[dcc-mcp-office](https://github.com/dcc-mcp/dcc-mcp-office).
 
 **Status: planned — not started.** This repository is a placeholder created
 as part of the Office Automation Platform repo split (see
