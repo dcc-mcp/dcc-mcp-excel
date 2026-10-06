@@ -241,7 +241,7 @@ def test_addressed_cell_needs_value_or_formula() -> None:
 
 
 def test_calculation_policy_mode_is_constrained() -> None:
-    with pytest.raises(IrValidationError, match="expected auto|manual"):
+    with pytest.raises(IrValidationError, match=r"expected auto\|manual"):
         parse_envelope(
             {
                 "schema_version": "office-ir/1.0",

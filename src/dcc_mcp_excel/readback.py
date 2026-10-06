@@ -85,13 +85,16 @@ def read_back(envelope: WorkbookEnvelope, xlsx_path: str | Path) -> ReadbackRepo
             title = sanitize_sheet_title(worksheet_ir.name, taken=taken)
             taken.add(title)
             expected_titles.append(title)
-        for index, (expected, actual) in enumerate(zip(expected_titles, workbook.sheetnames, strict=True), start=1):
+        # Lengths are known equal from the check above, so a plain zip is
+        # exact here. zip(strict=True) would say the same thing but is 3.10+,
+        # and this package supports 3.9.
+        for index, (expected, actual) in enumerate(zip(expected_titles, workbook.sheetnames), start=1):
             if expected != actual:
                 raise ValueError(f"worksheet {index}: expected title '{expected}', artifact has '{actual}'")
 
         checked = 0
         mismatches: list[Mismatch] = []
-        for worksheet_ir, title in zip(worksheet_irs, workbook.sheetnames, strict=True):
+        for worksheet_ir, title in zip(worksheet_irs, workbook.sheetnames):
             sheet = workbook[title]
             for row_index, row in enumerate(worksheet_ir.rows, start=1):
                 for column_index, expected_value in enumerate(row, start=1):

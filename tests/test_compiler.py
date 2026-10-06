@@ -197,7 +197,7 @@ def test_list_validation_without_values_raises(tmp_path: Path) -> None:
             },
         }
     )
-    with pytest.raises(KeyError, match="params.values"):
+    with pytest.raises(KeyError, match=r"params\.values"):
         compile_workbook(envelope, tmp_path / "v.xlsx")
 
 
@@ -245,7 +245,7 @@ def test_compile_raises_on_unsupported_conditional_format_params(tmp_path: Path)
             },
         }
     )
-    with pytest.raises(ValueError, match="params.formula"):
+    with pytest.raises(ValueError, match=r"params\.formula"):
         compile_workbook(envelope, tmp_path / "cf-bad.xlsx")
 
 
