@@ -24,8 +24,8 @@ full graded list.
 <!-- Generated from dcc-mcp-catalog.yml by scripts/generate_adapter_pointer.py in dcc-mcp/dcc-mcp-core. Do not edit by hand. -->
 ## Part of the DCC-MCP host matrix
 
-**dcc-mcp-excel** — Excel adapter for DCC-MCP — headless Workbook IR to XLSX
-compile with read-back verification over the dcc-mcp-office runtime.
+**dcc-mcp-excel** — Excel adapter for DCC-MCP — headless Workbook IR to XLSX compile
+with read-back verification over the dcc-mcp-office runtime.
 
 It is one of **39 host adapters** in the DCC-MCP catalog. Every adapter speaks the same
 MCP protocol and builds on the same core runtime contract; each one exposes the tools
