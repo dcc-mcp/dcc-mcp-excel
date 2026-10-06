@@ -36,7 +36,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 IR_VERSION: str = "office-ir/1.0"
 DOCUMENT_KIND: str = "workbook"
@@ -199,10 +199,11 @@ CALCULATION_MODES = frozenset({"auto", "manual"})
 
 CELL_LITERALS = (str, int, float, bool)
 
-# A cell holds a literal or nothing. Kept as a name because the tuple form is
-# repeated across worksheet/row/cell parsing; `from __future__ import
-# annotations` keeps the PEP 604 union legal on the 3.9 floor.
-_CELL_KIND = str | float | bool | None
+# A cell holds a literal or nothing. Written as a runtime Optional[Union[...]]
+# rather than a PEP 604 union because this is an assignment, not an
+# annotation: `from __future__ import annotations` defers annotations only, so
+# `str | None` here would raise TypeError on the 3.9 floor.
+_CELL_KIND = Optional[Union[str, float, bool]]
 
 
 def _require(mapping: dict[str, Any], key: str, path: str) -> Any:
