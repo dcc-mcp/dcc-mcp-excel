@@ -1,0 +1,61 @@
+{
+  "schema_version": "office-ir/1.0",
+  "kind": "workbook",
+  "document_id": "draft:shot-list",
+  "metadata": {
+    "title": "Shot list — Episode 01",
+    "author": "pipeline",
+    "language": "en"
+  },
+  "document": {
+    "worksheets": [
+      {
+        "name": "Shots",
+        "rows": [
+          ["shot", "sequence", "status", "frames", "artist", "due"],
+          ["sh010", "sq0100", "ip", 120, "li.ming", "2026-10-10"],
+          ["sh020", "sq0100", "fin", 84, "zhang.wei", "2026-10-08"],
+          ["sh030", "sq0200", "wip", 240, "li.ming", "2026-10-14"],
+          ["sh040", "sq0200", "not_started", 96, "chen.yu", "2026-10-16"]
+        ]
+      },
+      {
+        "name": "Summary",
+        "rows": [
+          ["metric", "value"],
+          ["shots", 4],
+          ["total_frames", 540],
+          ["artists", 3]
+        ]
+      }
+    ],
+    "tables": [
+      {"worksheet": "Shots", "range": "A1:F5", "name": "ShotTable"},
+      {"worksheet": "Summary", "range": "A1:B4", "name": "SummaryTable"}
+    ],
+    "named_ranges": [
+      {"name": "ShotCount", "refers_to": "Summary!$B$2"}
+    ],
+    "formulas": [
+      {"worksheet": "Summary", "cell": "B5", "formula": "=SUM(Shots!D2:D5)"}
+    ],
+    "validations": [
+      {
+        "worksheet": "Shots",
+        "range": "C2:C500",
+        "kind": "list",
+        "params": {"values": ["not_started", "wip", "ip", "fin", "omitted"]}
+      }
+    ],
+    "conditional_formats": [
+      {
+        "worksheet": "Shots",
+        "range": "D2:D500",
+        "kind": "data_bar",
+        "params": {"start_value": 0, "end_value": 300, "color": "638EC6"}
+      }
+    ],
+    "calculation_policy": {"mode": "auto", "full_calc_on_load": true}
+  },
+  "outputs": ["xlsx"]
+}
