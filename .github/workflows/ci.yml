@@ -29,25 +29,11 @@ jobs:
       - name: Pytest
         run: pytest -q
 
-  skill-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Skill lint (official dcc-mcp-cli validator)
-        run: |
-          # dcc-mcp-cli ships through the dcc-mcp-core release train, not pip.
-          # The Windows build is used because no Linux CLI build is published.
-          curl -fsSL -o "$RUNNER_TEMP/dcc-mcp-cli.exe" \
-            "https://github.com/dcc-mcp/dcc-mcp-core/releases/download/v0.20.6/dcc-mcp-cli-windows-x86_64.exe"
-          # wine is preinstalled on ubuntu-latest runners.
-          wine "$RUNNER_TEMP/dcc-mcp-cli.exe" lint src/dcc_mcp_excel/skills --warnings-as-errors --non-interactive
-
   packaging:
-    # Windows-only: the standalone PyOxidizer bundle targets the Office/COM
-    # domain. The headless gate above already covers the Office-free path.
+    # Windows-only: dcc-mcp-cli ships as a Windows binary through the
+    # dcc-mcp-core release train (not pip), and there is no Linux build to
+    # fall back on. The headless gate above already covers the Office-free
+    # path, so Windows here adds coverage rather than gating on it.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,8 +42,14 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: python -m pip install -e ".[dev]"
-      - name: CLI smoke (compile via the shared host is not wired; version + preflight must work)
+      - name: CLI smoke (version + preflight must work on a clean install)
         shell: pwsh
         run: |
           python -m dcc_mcp_excel._standalone_entry --version
           python -m dcc_mcp_excel._standalone_entry preflight
+      - name: Skill lint (official dcc-mcp-cli validator)
+        shell: pwsh
+        run: |
+          # dcc-mcp-cli ships through the dcc-mcp-core release train, not pip.
+          Invoke-WebRequest -Uri "https://github.com/dcc-mcp/dcc-mcp-core/releases/download/v0.20.6/dcc-mcp-cli-windows-x86_64.exe" -OutFile "$env:RUNNER_TEMP\dcc-mcp-cli.exe"
+          & "$env:RUNNER_TEMP\dcc-mcp-cli.exe" lint src/dcc_mcp_excel/skills --warnings-as-errors --non-interactive

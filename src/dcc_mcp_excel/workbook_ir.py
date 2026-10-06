@@ -36,7 +36,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any
 
 IR_VERSION: str = "office-ir/1.0"
 DOCUMENT_KIND: str = "workbook"
@@ -199,7 +199,10 @@ CALCULATION_MODES = frozenset({"auto", "manual"})
 
 CELL_LITERALS = (str, int, float, bool)
 
-_CELL_KIND: TypeAlias = str | float | bool | None
+# A cell holds a literal or nothing. Kept as a name because the tuple form is
+# repeated across worksheet/row/cell parsing; `from __future__ import
+# annotations` keeps the PEP 604 union legal on the 3.9 floor.
+_CELL_KIND = str | float | bool | None
 
 
 def _require(mapping: dict[str, Any], key: str, path: str) -> Any:
