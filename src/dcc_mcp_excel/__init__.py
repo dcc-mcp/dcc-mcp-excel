@@ -28,7 +28,7 @@ from .host_matrix import HOST_MATRIX, preflight
 from .validate import validate_artifacts, validate_envelope
 from .workbook_ir import IrValidationError, WorkbookEnvelope, load_workbook_ir
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "CAPABILITIES",
