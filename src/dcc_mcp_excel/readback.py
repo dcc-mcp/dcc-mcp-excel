@@ -16,7 +16,7 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from .workbook_io import cell_values_match, sanitize_sheet_title
+from .workbook_io import cell_values_match, sanitize_sheet_title, table_display_name
 from .workbook_ir import WorkbookEnvelope
 
 MISMATCH_LIMIT = 20
@@ -155,9 +155,11 @@ def _check_features(
     for spec in document.tables:
         sheet = workbook[ir_name_to_title[spec.worksheet]]
         titles = {str(name).lower() for name in sheet.tables}
-        if spec.name is None or spec.name.lower() not in titles:
+        if table_display_name(spec).lower() not in titles:
             mismatches.append(
-                FeatureMismatch("table", spec.worksheet, spec.range, spec.name, sorted(titles))
+                FeatureMismatch(
+                    "table", spec.worksheet, spec.range, table_display_name(spec), sorted(titles)
+                )
             )
 
     for spec in document.named_ranges:

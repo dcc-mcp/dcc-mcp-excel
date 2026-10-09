@@ -5,15 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from openpyxl import load_workbook
 
 from dcc_mcp_excel.compiler import compile_workbook
 from dcc_mcp_excel.readback import read_back
-from dcc_mcp_excel.workbook_io import cell_values_match
+from dcc_mcp_excel.workbook_io import cell_values_match, table_display_name
 from dcc_mcp_excel.workbook_ir import (
     Metadata,
     WorkbookEnvelope,
     WorkbookIr,
     Worksheet,
+    load_workbook_ir,
     parse_envelope,
 )
 
@@ -158,6 +160,49 @@ def test_read_back_checks_feature_on_sanitized_sheet_title(tmp_path: Path) -> No
     assert report.formulas_present == 1
     assert report.validations == 1
     assert report.conditional_formats == 1
+
+
+def test_read_back_accepts_unnamed_table(tmp_path: Path) -> None:
+    """`TableSpec.name` is optional, so an unnamed table must not fail the gate.
+
+    The compiler derives a display name from the range; the gate has to look
+    for that same derived name, or a correctly written table reads as missing.
+    """
+    ir = {
+        "schema_version": "office-ir/1.0",
+        "kind": "workbook",
+        "document_id": "draft:unnamed",
+        "metadata": {"title": "unnamed"},
+        "document": {
+            "worksheets": [{"name": "Shots", "rows": [["shot", "status"], ["sh010", "ip"]]}],
+            "tables": [{"worksheet": "Shots", "range": "A1:B2"}],
+        },
+    }
+    envelope = load_workbook_ir(ir)
+    out = compile_workbook(envelope, tmp_path / "unnamed.xlsx")
+    assert list(load_workbook(str(out))["Shots"].tables) == ["TableA1_B2"]
+    report = read_back(envelope, out)
+    assert report.ok, report.to_dict()
+    assert report.feature_mismatches == ()
+
+
+def test_unnamed_table_display_name_matches_compiler(tmp_path: Path) -> None:
+    """Both sides derive the fallback name through one shared helper."""
+    ir = {
+        "schema_version": "office-ir/1.0",
+        "kind": "workbook",
+        "document_id": "draft:anchored",
+        "metadata": {"title": "anchored"},
+        "document": {
+            "worksheets": [{"name": "S", "rows": [["a", "b"], ["c", "d"]]}],
+            "tables": [{"worksheet": "S", "range": "$A$1:$B$2"}],
+        },
+    }
+    envelope = load_workbook_ir(ir)
+    out = compile_workbook(envelope, tmp_path / "anchored.xlsx")
+    assert table_display_name(envelope.document.tables[0]) == "TableA1_B2"
+    assert list(load_workbook(str(out))["S"].tables) == ["TableA1_B2"]
+    assert read_back(envelope, out).ok
 
 
 def test_read_back_detects_dropped_features(tmp_path: Path) -> None:

@@ -32,7 +32,7 @@ from openpyxl.worksheet.table import Table as OpenpyxlTable
 from openpyxl.worksheet.table import TableStyleInfo
 from openpyxl.worksheet.worksheet import Worksheet as OpenpyxlWorksheet
 
-from .workbook_io import XLSX_SUFFIX, sanitize_sheet_title
+from .workbook_io import XLSX_SUFFIX, sanitize_sheet_title, table_display_name
 from .workbook_ir import (
     WorkbookEnvelope,
     WorkbookIr,
@@ -177,7 +177,7 @@ def _write_tables(sheet: OpenpyxlWorksheet, ir_name: str, document: WorkbookIr) 
     for spec in document.tables:
         if spec.worksheet != ir_name:
             continue
-        name = spec.name or f"Table{_split_range(spec.range).replace(':', '_')}"
+        name = table_display_name(spec)
         table = OpenpyxlTable(displayName=name, ref=_split_range(spec.range))
         table.tableStyleInfo = TableStyleInfo(
             name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False

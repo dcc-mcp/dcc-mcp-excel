@@ -46,6 +46,21 @@ def resolve_output_path(envelope: WorkbookEnvelope, out_dir: str | Path, *, suff
     return out / f"{artifact_stem(envelope.document_id)}{suffix}"
 
 
+def table_display_name(spec: Any) -> str:
+    """The openpyxl table name an IR table spec is written under.
+
+    `TableSpec.name` is optional, so the compiler and the read-back gate must
+    derive the same fallback from the same place: two rules here would make
+    the gate report a correctly-written unnamed table as missing.
+    """
+    name = getattr(spec, "name", None)
+    if name:
+        return name
+    reference = str(getattr(spec, "range", ""))
+    _sheet, _sep, address = reference.rpartition("!")
+    return "Table" + (address or reference).replace("$", "").replace(":", "_")
+
+
 def cell_values_match(expected: Any, actual: Any) -> bool:
     """Compare one expected IR value against a value read back from xlsx."""
     if expected is None:
