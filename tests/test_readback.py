@@ -126,6 +126,101 @@ def test_read_back_reports_features(tmp_path: Path) -> None:
     assert report.conditional_formats == 1
 
 
+def test_read_back_checks_feature_on_sanitized_sheet_title(tmp_path: Path) -> None:
+    """The gate must hold when the sheet title needed sanitizing.
+
+    `Shot/List` compiles to `Shot-List`; every feature still has to be found
+    on that sheet. This is the combination the old suite never covered.
+    """
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:sanitized",
+            "metadata": {"title": "sanitized"},
+            "document": {
+                "worksheets": [{"name": "Shot/List", "rows": [["n", "v"], ["a", "3"]]}],
+                "named_ranges": [{"name": "Total", "refers_to": "'Shot/List'!$A$1:$B$2"}],
+                "formulas": [{"worksheet": "Shot/List", "cell": "C1", "formula": "=B1*2"}],
+                "validations": [
+                    {"worksheet": "Shot/List", "range": "A2:A9", "kind": "list", "params": {"values": ["a", "b"]}}
+                ],
+                "conditional_formats": [
+                    {"worksheet": "Shot/List", "range": "B2:B9", "kind": "cell_value", "params": {"formula": ["5"]}}
+                ],
+                "tables": [{"worksheet": "Shot/List", "range": "A1:B2", "name": "ShotTable"}],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "sanitized.xlsx")
+    report = read_back(envelope, out)
+    assert report.ok, report.to_dict()
+    assert report.formulas_present == 1
+    assert report.validations == 1
+    assert report.conditional_formats == 1
+
+
+def test_read_back_detects_dropped_features(tmp_path: Path) -> None:
+    """The gate must fail when a declared feature is missing from the artifact.
+
+    Same artifact, richer IR: the extra features were never compiled, so a
+    gate that only counts them would stay green. This pins the comparison.
+    """
+    base = {
+        "schema_version": "office-ir/1.0",
+        "kind": "workbook",
+        "document_id": "draft:drop",
+        "metadata": {"title": "drop"},
+        "document": {"worksheets": [{"name": "S", "rows": [["n", 3]]}]},
+    }
+    compiled = parse_envelope(base)
+
+    richer = parse_envelope(
+        {
+            **base,
+            "document": {
+                **base["document"],
+                "validations": [
+                    {"worksheet": "S", "range": "A2:A9", "kind": "list", "params": {"values": ["a"]}}
+                ],
+                "conditional_formats": [
+                    {"worksheet": "S", "range": "B2:B9", "kind": "cell_value", "params": {"formula": ["5"]}}
+                ],
+                "tables": [{"worksheet": "S", "range": "A1:B9", "name": "T"}],
+            },
+        }
+    )
+    out = compile_workbook(compiled, tmp_path / "dropped.xlsx")
+    report = read_back(richer, out)
+    assert not report.ok
+    dropped = {m.feature for m in report.feature_mismatches}
+    assert dropped == {"validation", "conditional_format", "table"}
+
+
+def test_read_back_detects_dropped_formula(tmp_path: Path) -> None:
+    base = {
+        "schema_version": "office-ir/1.0",
+        "kind": "workbook",
+        "document_id": "draft:drop-f",
+        "metadata": {"title": "drop-f"},
+        "document": {"worksheets": [{"name": "S", "rows": [["a", 2]]}]},
+    }
+    out = compile_workbook(parse_envelope(base), tmp_path / "nf.xlsx")
+    with_formula = parse_envelope(
+        {
+            **base,
+            "document": {
+                **base["document"],
+                "formulas": [{"worksheet": "S", "cell": "C1", "formula": "=B1*2"}],
+            },
+        }
+    )
+    report = read_back(with_formula, out)
+    assert not report.ok
+    assert report.feature_mismatches[0].feature == "formula"
+    assert report.feature_mismatches[0].expected == "=B1*2"
+
+
 def test_read_back_missing_file_raises(tmp_path: Path) -> None:
     envelope = _envelope(WorkbookIr(worksheets=(Worksheet(name="S"),)))
     with pytest.raises(FileNotFoundError):

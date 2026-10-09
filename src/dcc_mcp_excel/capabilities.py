@@ -60,7 +60,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         name="workbook.formulas.write",
         grade=VERIFIED,
         summary="Formula text is written to the sheet; the formula string round-trips.",
-        evidence="tests/test_readback.py::test_read_back_detects_formulas_present.",
+        evidence="tests/test_readback.py::test_read_back_checks_feature_on_sanitized_sheet_title.",
         requires_office=False,
     ),
     Capability(
@@ -74,14 +74,14 @@ CAPABILITIES: tuple[Capability, ...] = (
         name="workbook.validation",
         grade=VERIFIED,
         summary="Data-validation rules (list/whole/decimal/date/custom) are written to the sheet.",
-        evidence="tests/test_compiler.py::test_compile_writes_list_validation.",
+        evidence="tests/test_compiler.py::test_compile_writes_validation_on_sanitized_sheet_title.",
         requires_office=False,
     ),
     Capability(
         name="workbook.conditional_format",
         grade=VERIFIED,
         summary="cell_value / color_scale / data_bar / formula rules are written to the sheet.",
-        evidence="tests/test_compiler.py::test_compile_writes_conditional_formats.",
+        evidence="tests/test_compiler.py::test_compile_writes_conditional_format_on_sanitized_sheet_title.",
         requires_office=False,
     ),
     Capability(

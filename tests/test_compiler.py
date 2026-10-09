@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
-from dcc_mcp_excel.compiler import compile_workbook
+from dcc_mcp_excel.compiler import UnknownWorksheetError, compile_workbook
 from dcc_mcp_excel.workbook_ir import (
     Metadata,
     WorkbookEnvelope,
@@ -107,6 +107,68 @@ def test_compile_writes_addressed_cells(tmp_path: Path) -> None:
     sheet = load_workbook(str(out))["S"]
     assert sheet["B2"].value == 42
     assert sheet["C2"].value == "=B2*2"
+
+
+def test_unqualified_cell_writes_only_the_first_sheet(tmp_path: Path) -> None:
+    """`document.cells` is document-level: one write, onto the first sheet."""
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:multi",
+            "metadata": {"title": "multi"},
+            "document": {
+                "worksheets": [{"name": "A", "rows": []}, {"name": "B", "rows": []}],
+                "cells": [{"address": "B2", "value": 42}],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "multi.xlsx")
+    workbook = load_workbook(str(out))
+    assert workbook["A"]["B2"].value == 42
+    assert workbook["B"]["B2"].value is None
+
+
+def test_qualified_cell_targeting_non_first_sheet_compiles(tmp_path: Path) -> None:
+    """A sheet qualifier may name any sheet, not just the first one."""
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:multi",
+            "metadata": {"title": "multi"},
+            "document": {
+                "worksheets": [{"name": "A", "rows": []}, {"name": "Summary", "rows": []}],
+                "cells": [{"address": "Summary!B2", "value": 7}],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "qualified.xlsx")
+    workbook = load_workbook(str(out))
+    assert workbook["Summary"]["B2"].value == 7
+    assert workbook["A"]["B2"].value is None
+
+
+def test_qualified_cell_resolves_sanitized_sheet_name(tmp_path: Path) -> None:
+    """A qualifier names the IR sheet, so a sanitized title stays addressable.
+
+    The IR grammar allows a sheet qualifier only bare (identifier-like) or
+    single-quoted, so an illegal title is addressed in its quoted form.
+    """
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:multi",
+            "metadata": {"title": "multi"},
+            "document": {
+                "worksheets": [{"name": "A", "rows": []}, {"name": "Sum/mary", "rows": []}],
+                "cells": [{"address": "'Sum/mary'!B2", "value": 5}],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "sanitized-qualified.xlsx")
+    assert load_workbook(str(out))["Sum-mary"]["B2"].value == 5
 
 
 def test_addressed_cell_naming_unknown_sheet_raises(tmp_path: Path) -> None:
@@ -266,6 +328,113 @@ def test_compile_applies_calculation_policy_metadata(tmp_path: Path) -> None:
     workbook = load_workbook(str(out))
     assert workbook.properties.title == "calc"
     assert workbook.calculation.fullCalcOnLoad is True
+
+
+def test_compile_writes_validation_on_sanitized_sheet_title(tmp_path: Path) -> None:
+    """A title needing sanitization must not silently drop its validation.
+
+    `Shot/List` compiles to `Shot-List`. Matching the spec against the
+    compiled title skipped it; the IR name is the only correct key.
+    """
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:sanitized",
+            "metadata": {"title": "sanitized"},
+            "document": {
+                "worksheets": [{"name": "Shot/List", "rows": [["status"]]}],
+                "validations": [
+                    {"worksheet": "Shot/List", "range": "A2:A99", "kind": "list", "params": {"values": ["ip", "fin"]}}
+                ],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "sanitized.xlsx")
+    sheet = load_workbook(str(out))["Shot-List"]
+    assert len(sheet.data_validations.dataValidation) == 1
+
+
+def test_compile_writes_conditional_format_on_sanitized_sheet_title(tmp_path: Path) -> None:
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:sanitized",
+            "metadata": {"title": "sanitized"},
+            "document": {
+                "worksheets": [{"name": "Shot/List", "rows": [["n", 3]]}],
+                "conditional_formats": [
+                    {"worksheet": "Shot/List", "range": "B2:B9", "kind": "cell_value", "params": {"formula": ["5"]}}
+                ],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "cf-sanitized.xlsx")
+    rules = load_workbook(str(out))["Shot-List"].conditional_formatting._cf_rules
+    applied = [entry for entry in rules if str(entry.sqref) == "B2:B9"]
+    assert len(applied) == 1
+
+
+def test_compile_writes_formula_on_sanitized_sheet_title(tmp_path: Path) -> None:
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:sanitized",
+            "metadata": {"title": "sanitized"},
+            "document": {
+                "worksheets": [{"name": "Shot/List", "rows": [["a", 2]]}],
+                "formulas": [{"worksheet": "Shot/List", "cell": "C1", "formula": "=B1*2"}],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "f-sanitized.xlsx")
+    assert load_workbook(str(out))["Shot-List"]["C1"].value == "=B1*2"
+
+
+@pytest.mark.parametrize(
+    "feature_key,spec",
+    [
+        ("formulas", {"cell": "C1", "formula": "=B1*2"}),
+        ("validations", {"range": "A2:A9", "kind": "list", "params": {"values": ["a"]}}),
+        ("conditional_formats", {"range": "B2:B9", "kind": "cell_value", "params": {"formula": ["5"]}}),
+        ("tables", {"range": "A1:B9", "name": "T"}),
+    ],
+)
+def test_compile_raises_when_feature_names_unknown_worksheet(
+    tmp_path: Path, feature_key: str, spec: dict
+) -> None:
+    """An unwritable spec is an error, never a silently dropped feature."""
+    document = {"worksheets": [{"name": "S", "rows": []}], feature_key: [{"worksheet": "Ghost", **spec}]}
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:ghost",
+            "metadata": {"title": "ghost"},
+            "document": document,
+        }
+    )
+    with pytest.raises(UnknownWorksheetError, match="unknown worksheet 'Ghost'"):
+        compile_workbook(envelope, tmp_path / "ghost.xlsx")
+
+
+def test_compile_writes_tables(tmp_path: Path) -> None:
+    envelope = parse_envelope(
+        {
+            "schema_version": "office-ir/1.0",
+            "kind": "workbook",
+            "document_id": "draft:t",
+            "metadata": {"title": "t"},
+            "document": {
+                "worksheets": [{"name": "Shots", "rows": [["shot", "status"], ["sh010", "ip"]]}],
+                "tables": [{"worksheet": "Shots", "range": "A1:B2", "name": "ShotTable"}],
+            },
+        }
+    )
+    out = compile_workbook(envelope, tmp_path / "tables.xlsx")
+    assert list(load_workbook(str(out))["Shots"].tables) == ["ShotTable"]
 
 
 def test_compile_example_workbook(tmp_path: Path) -> None:

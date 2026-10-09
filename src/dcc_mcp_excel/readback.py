@@ -31,6 +31,17 @@ class Mismatch:
 
 
 @dataclass(frozen=True)
+class FeatureMismatch:
+    """A structured feature the IR asked for that the artifact does not carry."""
+
+    feature: str
+    sheet: str
+    reference: str
+    expected: Any
+    actual: Any
+
+
+@dataclass(frozen=True)
 class ReadbackReport:
     path: str
     sheets: tuple[str, ...]
@@ -40,10 +51,11 @@ class ReadbackReport:
     named_ranges: tuple[str, ...]
     validations: int
     conditional_formats: int
+    feature_mismatches: tuple[FeatureMismatch, ...] = ()
 
     @property
     def ok(self) -> bool:
-        return not self.mismatches
+        return not self.mismatches and not self.feature_mismatches
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,11 +71,102 @@ class ReadbackReport:
             "named_ranges": list(self.named_ranges),
             "validations": self.validations,
             "conditional_formats": self.conditional_formats,
+            "feature_mismatches": [
+                {
+                    "feature": f.feature,
+                    "sheet": f.sheet,
+                    "reference": f.reference,
+                    "expected": f.expected,
+                    "actual": f.actual,
+                }
+                for f in self.feature_mismatches
+            ],
         }
 
 
 def _address(row: int, column: int) -> str:
     return f"{get_column_letter(column)}{row}"
+
+
+def _normalize_range(reference: str) -> str:
+    """Fold an A1 reference to a comparable form (no `$`, no sheet qualifier)."""
+    _sheet, _sep, address = reference.rpartition("!")
+    return (address or reference).replace("$", "").upper()
+
+
+def _cf_ranges(sheet: Any) -> set[str]:
+    """Every conditional-formatting range on `sheet`, normalized."""
+    return {str(entry.sqref).replace("$", "").upper() for entry in sheet.conditional_formatting._cf_rules}
+
+
+def _validation_ranges(sheet: Any) -> set[str]:
+    """Every data-validation range on `sheet`, normalized."""
+    ranges: set[str] = set()
+    for validation in sheet.data_validations.dataValidation:
+        ranges.update(_normalize_range(str(ref)) for ref in validation.sqref.ranges)
+    return ranges
+
+
+def _check_features(
+    envelope: WorkbookEnvelope,
+    workbook: Any,
+    ir_name_to_title: dict[str, str],
+) -> tuple[FeatureMismatch, ...]:
+    """Compare the structured features the IR declared against the artifact.
+
+    Counting them is not verification: a feature dropped during compile leaves
+    the count lower and the gate still green. Every declared feature must be
+    found on its own sheet at its own reference.
+    """
+    document = envelope.document
+    mismatches: list[FeatureMismatch] = []
+
+    for spec in document.formulas:
+        sheet = workbook[ir_name_to_title[spec.worksheet]]
+        expected = spec.formula
+        actual = sheet[_normalize_range(spec.cell)].value
+        if actual != expected:
+            mismatches.append(
+                FeatureMismatch("formula", spec.worksheet, spec.cell, expected, actual)
+            )
+
+    for spec in document.validations:
+        sheet = workbook[ir_name_to_title[spec.worksheet]]
+        if _normalize_range(spec.range) not in _validation_ranges(sheet):
+            mismatches.append(
+                FeatureMismatch(
+                    "validation", spec.worksheet, spec.range, spec.range, sorted(_validation_ranges(sheet))
+                )
+            )
+
+    for spec in document.conditional_formats:
+        sheet = workbook[ir_name_to_title[spec.worksheet]]
+        if _normalize_range(spec.range) not in _cf_ranges(sheet):
+            mismatches.append(
+                FeatureMismatch(
+                    "conditional_format",
+                    spec.worksheet,
+                    spec.range,
+                    spec.range,
+                    sorted(_cf_ranges(sheet)),
+                )
+            )
+
+    for spec in document.tables:
+        sheet = workbook[ir_name_to_title[spec.worksheet]]
+        titles = {str(name).lower() for name in sheet.tables}
+        if spec.name is None or spec.name.lower() not in titles:
+            mismatches.append(
+                FeatureMismatch("table", spec.worksheet, spec.range, spec.name, sorted(titles))
+            )
+
+    for spec in document.named_ranges:
+        if spec.name not in workbook.defined_names:
+            mismatches.append(
+                FeatureMismatch("named_range", "", spec.refers_to, spec.name, list(workbook.defined_names))
+            )
+
+    return tuple(mismatches)
 
 
 def read_back(envelope: WorkbookEnvelope, xlsx_path: str | Path) -> ReadbackReport:
@@ -85,6 +188,9 @@ def read_back(envelope: WorkbookEnvelope, xlsx_path: str | Path) -> ReadbackRepo
             title = sanitize_sheet_title(worksheet_ir.name, taken=taken)
             taken.add(title)
             expected_titles.append(title)
+        # Feature specs address sheets by their IR name, which may differ from
+        # the compiled title once sanitization kicks in.
+        ir_name_to_title = {ws.name: title for ws, title in zip(worksheet_irs, expected_titles)}
         # Lengths are known equal from the check above, so a plain zip is
         # exact here. zip(strict=True) would say the same thing but is 3.10+,
         # and this package supports 3.9.
@@ -133,6 +239,7 @@ def read_back(envelope: WorkbookEnvelope, xlsx_path: str | Path) -> ReadbackRepo
             named_ranges=tuple(workbook.defined_names),
             validations=validations,
             conditional_formats=conditional_formats,
+            feature_mismatches=_check_features(envelope, workbook, ir_name_to_title),
         )
     finally:
         workbook.close()

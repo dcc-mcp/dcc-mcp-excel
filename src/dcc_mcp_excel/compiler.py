@@ -1,10 +1,13 @@
 """Headless Open XML compiler — Workbook IR → XLSX (ADR 004).
 
 Contract-first: the compiler is an *implementation* of the workbook
-contract. It writes structure only — cells, formulas, named ranges,
+contract. It writes structure only — cells, formulas, named ranges, tables,
 validation and conditional formatting. Native recomputation, chart refresh
 and pivots require the Excel COM host and are reported as `host_limited`
 rather than being faked (see `dcc_mcp_excel.capabilities`).
+
+Nothing is silently dropped: a feature spec naming an unknown worksheet
+raises `UnknownWorksheetError` instead of being skipped.
 
 The dependency on openpyxl is opt-in exactly like python-pptx in
 dcc-mcp-powerpoint: package import never pulls it, only this module does.
@@ -25,6 +28,8 @@ from openpyxl.formatting.rule import (
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.table import Table as OpenpyxlTable
+from openpyxl.worksheet.table import TableStyleInfo
 from openpyxl.worksheet.worksheet import Worksheet as OpenpyxlWorksheet
 
 from .workbook_io import XLSX_SUFFIX, sanitize_sheet_title
@@ -56,20 +61,25 @@ def _write_rows(sheet: OpenpyxlWorksheet, rows: tuple[tuple[Any, ...], ...]) -> 
     return len(rows)
 
 
-def _write_cells(sheet: OpenpyxlWorksheet, document: WorkbookIr) -> None:
-    """Write `document.cells` (addressed writes) onto the active sheet.
+def _write_cells(
+    document: WorkbookIr,
+    ir_name: str,
+    sheets_by_ir_name: dict[str, OpenpyxlWorksheet],
+) -> None:
+    """Write `document.cells` (addressed writes) once, after every sheet exists.
 
-    Addressed cells target the first worksheet unless the address carries a
-    sheet qualifier, matching how the IR addresses the grid.
+    Unqualified addresses land on the first worksheet; a `Sheet!A1` qualifier
+    is resolved against the **IR** worksheet names so a title that had to be
+    sanitized is still addressable.
     """
     for cell in document.cells:
         sheet_ref, _sep, address = cell.address.rpartition("!")
-        target = sheet
+        target = sheets_by_ir_name[ir_name]
         if sheet_ref:
-            candidate = sheet.parent[sheet_ref.strip("'")] if sheet_ref.strip("'") in sheet.parent.sheetnames else None
-            if candidate is None:
+            name = sheet_ref.strip("'")
+            if name not in sheets_by_ir_name:
                 raise KeyError(f"cell '{cell.address}' names unknown worksheet '{sheet_ref}'")
-            target = candidate
+            target = sheets_by_ir_name[name]
         handle = target[address.replace("$", "")]
         if cell.is_formula:
             handle.value = cell.formula
@@ -77,16 +87,16 @@ def _write_cells(sheet: OpenpyxlWorksheet, document: WorkbookIr) -> None:
             handle.value = cell.value
 
 
-def _write_formulas(sheet: OpenpyxlWorksheet, document: WorkbookIr) -> None:
+def _write_formulas(sheet: OpenpyxlWorksheet, ir_name: str, document: WorkbookIr) -> None:
     for formula in document.formulas:
-        if formula.worksheet != sheet.title:
+        if formula.worksheet != ir_name:
             continue
         sheet[formula.cell.replace("$", "")].value = formula.formula
 
 
-def _write_validations(sheet: OpenpyxlWorksheet, document: WorkbookIr) -> None:
+def _write_validations(sheet: OpenpyxlWorksheet, ir_name: str, document: WorkbookIr) -> None:
     for spec in document.validations:
-        if spec.worksheet != sheet.title:
+        if spec.worksheet != ir_name:
             continue
         validation = DataValidation(type=spec.kind, allow_blank=True)
         if spec.kind == "list":
@@ -149,12 +159,30 @@ def _style_kwargs(params: dict[str, Any]) -> dict[str, Any]:
     return {key: params[key] for key in allowed if key in params}
 
 
-def _write_conditional_formats(sheet: OpenpyxlWorksheet, document: WorkbookIr) -> None:
+def _write_conditional_formats(sheet: OpenpyxlWorksheet, ir_name: str, document: WorkbookIr) -> None:
     for spec in document.conditional_formats:
-        if spec.worksheet != sheet.title:
+        if spec.worksheet != ir_name:
             continue
         rule = _conditional_rule(spec)
         sheet.conditional_formatting.add(_split_range(spec.range), rule)
+
+
+def _write_tables(sheet: OpenpyxlWorksheet, ir_name: str, document: WorkbookIr) -> None:
+    """Materialize the IR tables as real openpyxl tables on `sheet`.
+
+    Tables were parsed and validated but never written, so the read-back gate
+    now reports them as missing. An unnamed table gets a name derived from its
+    range; openpyxl requires one.
+    """
+    for spec in document.tables:
+        if spec.worksheet != ir_name:
+            continue
+        name = spec.name or f"Table{_split_range(spec.range).replace(':', '_')}"
+        table = OpenpyxlTable(displayName=name, ref=_split_range(spec.range))
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False
+        )
+        sheet.add_table(table)
 
 
 def _write_named_ranges(workbook: Workbook, document: WorkbookIr) -> None:
@@ -173,6 +201,10 @@ def _autosize_columns(sheet: OpenpyxlWorksheet, rows: tuple[tuple[Any, ...], ...
         sheet.column_dimensions[get_column_letter(index)].width = max(DEFAULT_SHEET_COLUMN_WIDTH, float(min(width + 2, 60)))
 
 
+class UnknownWorksheetError(ValueError):
+    """A feature spec names a worksheet the IR does not define."""
+
+
 class WorkbookCompiler:
     """Compiles a WorkbookEnvelope into an XLSX file via openpyxl."""
 
@@ -183,7 +215,33 @@ class WorkbookCompiler:
             workbook.remove(workbook.active)
         self.wb = workbook
         self.titles: set[str] = set()
+        self.sheets_by_ir_name: dict[str, OpenpyxlWorksheet] = {}
         self.summary: dict[str, Any] = {"sheets": [], "rows": 0}
+
+    def _require_known_worksheets(self) -> None:
+        """Reject feature specs naming a worksheet the IR does not define.
+
+        Titles are sanitized on the way into the artifact (`Shots 10/06`
+        becomes `Shots 10-06`), so matching a spec against the compiled title
+        silently skips it. Validate against the IR names up front instead: an
+        unwritable spec is an error, never a dropped feature.
+        """
+        known = [worksheet.name for worksheet in self.envelope.document.worksheets]
+        known_set = set(known)
+        for label, specs in (
+            ("table", self.envelope.document.tables),
+            ("formula", self.envelope.document.formulas),
+            ("validation", self.envelope.document.validations),
+            ("conditional_format", self.envelope.document.conditional_formats),
+            ("chart", self.envelope.document.charts),
+            ("pivot", self.envelope.document.pivots),
+        ):
+            for spec in specs:
+                if spec.worksheet not in known_set:
+                    raise UnknownWorksheetError(
+                        f"{label} names unknown worksheet '{spec.worksheet}'; "
+                        f"IR defines: {', '.join(repr(name) for name in known)}"
+                    )
 
     def _apply_metadata(self) -> None:
         metadata = self.envelope.metadata
@@ -198,21 +256,28 @@ class WorkbookCompiler:
         title = sanitize_sheet_title(worksheet_ir.name, taken=self.titles)
         self.titles.add(title)
         sheet = self.wb.create_sheet(title=title)
+        self.sheets_by_ir_name[worksheet_ir.name] = sheet
         rows_written = _write_rows(sheet, worksheet_ir.rows)
         _autosize_columns(sheet, worksheet_ir.rows)
         document = self.envelope.document
-        _write_cells(sheet, document)
-        _write_formulas(sheet, document)
-        _write_validations(sheet, document)
-        _write_conditional_formats(sheet, document)
+        _write_formulas(sheet, worksheet_ir.name, document)
+        _write_validations(sheet, worksheet_ir.name, document)
+        _write_conditional_formats(sheet, worksheet_ir.name, document)
+        _write_tables(sheet, worksheet_ir.name, document)
         self.summary["sheets"].append({"name": title, "rows": rows_written})
         self.summary["rows"] += rows_written
 
     def compile(self, out_path: str | Path) -> Path:
         document = self.envelope.document
+        self._require_known_worksheets()
         self._apply_metadata()
         for worksheet_ir in document.worksheets:
             self._compile_sheet(worksheet_ir)
+        if document.cells:
+            # `document.cells` is a document-level list, not a per-sheet one:
+            # it is written exactly once, and only after every sheet exists so
+            # a qualified address can target any of them.
+            _write_cells(document, document.worksheets[0].name, self.sheets_by_ir_name)
         _write_named_ranges(self.wb, document)
         out = Path(out_path)
         if out.suffix.lower() != XLSX_SUFFIX:
