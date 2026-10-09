@@ -1,0 +1,82 @@
+tools:
+- name: generate_workbook
+  execution: sync
+  affinity: any
+  enforce_thread_affinity: false
+  job_strategy: monolithic
+  annotations:
+    idempotent_hint: true
+  description: >-
+    Compile a Workbook IR JSON (office-ir/1.0 workbook envelope) into a native
+    XLSX through the headless Open XML backend, then reopen the artifact and
+    verify every cell against the source IR. No Excel installation required.
+    Returns the artifact path, per-sheet row counts, the read-back verdict
+    (cells checked and mismatches) and a structural validation report. Use for
+    any xlsx generation task.
+  input_schema:
+    type: object
+    properties:
+      input:
+        type: string
+        description: Path to the Workbook IR JSON file
+      output_dir:
+        type: string
+        description: Directory for the generated xlsx artifact
+      verify:
+        type: boolean
+        description: Reopen the artifact and compare every cell against the IR
+        default: true
+    required: [input, output_dir]
+  call_examples:
+  - arguments: {"input": "workbook.json", "output_dir": "out"}
+    note: Compile a workbook and read it back to verify every cell
+  - arguments: {"input": "workbook.json", "output_dir": "out", "verify": false}
+    note: Compile the XLSX only, skipping the read-back step
+- name: validate_workbook
+  execution: sync
+  affinity: any
+  enforce_thread_affinity: false
+  job_strategy: monolithic
+  annotations:
+    read_only_hint: true
+    idempotent_hint: true
+  description: >-
+    Validate a Workbook IR JSON (contract + structural checks) or check that
+    produced artifacts exist and are non-empty. Returns ok/checks/warnings —
+    host-limited features (charts, pivots) are reported as declared but
+    unverified, never as passing checks.
+  input_schema:
+    type: object
+    properties:
+      input:
+        type: string
+        description: Path to the Workbook IR JSON file, or a directory of artifacts
+    required: [input]
+  call_examples:
+  - arguments: {"input": "workbook.json"}
+    note: Validate a Workbook IR envelope before compiling
+  - arguments: {"input": "out"}
+    note: Check that produced artifacts exist and are non-empty
+- name: inspect_workbook
+  execution: sync
+  affinity: any
+  enforce_thread_affinity: false
+  job_strategy: monolithic
+  annotations:
+    read_only_hint: true
+    idempotent_hint: true
+  description: >-
+    Read-only inventory of an existing XLSX: sheet names and dimensions,
+    populated-cell and formula counts, defined names, data validations and
+    conditional-format ranges. Run before editing a workbook you did not
+    generate.
+  input_schema:
+    type: object
+    properties:
+      input:
+        type: string
+        description: Path to the XLSX file
+    required: [input]
+  call_examples:
+  - arguments: {"input": "out/shot-list.xlsx"}
+    note: Inventory a generated workbook before handing it off
