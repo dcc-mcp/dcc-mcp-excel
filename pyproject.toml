@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dcc-mcp-excel"
-version = "0.1.0"
+version = "0.1.1"
 description = "Excel adapter for the DCC-MCP ecosystem — headless Workbook IR to XLSX compile with read-back verification over the dcc-mcp-office runtime"
 authors = [{ name = "Long Hao", email = "hal.long@outlook.com" }]
 readme = "README.md"
