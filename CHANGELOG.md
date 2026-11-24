@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4](https://github.com/dcc-mcp/dcc-mcp-excel/compare/v0.1.3...v0.1.4) (2026-11-24)
+
+
+### Documentation
+
+* refresh the generated DCC-MCP host matrix pointer ([a2704ef](https://github.com/dcc-mcp/dcc-mcp-excel/commit/a2704ef2ea2abbadb6349e83d81fc4888d89dae1))
+* refresh the generated DCC-MCP host matrix pointer ([5dcdb59](https://github.com/dcc-mcp/dcc-mcp-excel/commit/5dcdb59c3545375e58bdc81b806bfdc3dfda0708))
+
 ## [0.1.3](https://github.com/dcc-mcp/dcc-mcp-excel/compare/v0.1.2...v0.1.3) (2026-10-17)
 
 
